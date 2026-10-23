@@ -32,6 +32,22 @@ class DialLeadRequest(BaseModel):
     preferred_language: Optional[str] = "te"  # 'te', 'en'
     email: Optional[str] = None
     forced_outcome: Optional[str] = None  # None (auto), 'demo_requested', 'callback_requested', 'not_interested', 'opted_out'
+    calling_mode: Optional[str] = "simulated"  # 'simulated' or 'real'
+    telephony_provider: Optional[str] = "twilio"  # 'twilio', 'exotel'
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_from_number: Optional[str] = None
+
+
+class TestRealCallRequest(BaseModel):
+    phone_number: str
+    contact_name: Optional[str] = "Client"
+    college_name: Optional[str] = "Institution"
+    preferred_language: Optional[str] = "en"
+    telephony_provider: Optional[str] = "twilio"
+    account_sid: Optional[str] = None
+    auth_token: Optional[str] = None
+    from_number: Optional[str] = None
 
 
 @router.get("/sample-csv", response_class=PlainTextResponse)
@@ -230,8 +246,49 @@ async def upload_csv_leads(
     }
 
 
+@router.post("/test-real-call")
+async def test_real_phone_call(
+    req: TestRealCallRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Directly dials a real phone number via Twilio or Exotel to test real PSTN/mobile connectivity.
+    """
+    try:
+        norm_phone = normalize_indian_phone(req.phone_number)
+    except Exception:
+        norm_phone = req.phone_number
+
+    if req.telephony_provider == "twilio":
+        from app.services.telephony.twilio import TwilioTelephonyProvider
+        provider = TwilioTelephonyProvider(
+            account_sid=req.account_sid,
+            auth_token=req.auth_token,
+            virtual_number=req.from_number
+        )
+        result = await provider.initiate_call(
+            to_phone=norm_phone,
+            metadata={
+                "contact_name": req.contact_name,
+                "college_name": req.college_name,
+                "preferred_language": req.preferred_language
+            }
+        )
+        return result
+    elif req.telephony_provider == "exotel":
+        from app.services.telephony.exotel import ExotelTelephonyProvider
+        provider = ExotelTelephonyProvider()
+        result = await provider.initiate_call(
+            to_phone=norm_phone,
+            metadata={"contact_name": req.contact_name, "college_name": req.college_name}
+        )
+        return result
+    else:
+        raise HTTPException(status_code=400, detail="Unknown telephony provider")
+
+
 @router.post("/dial-lead")
-def execute_autodial_call(
+async def execute_autodial_call(
     req: DialLeadRequest,
     db: Session = Depends(get_db)
 ):
@@ -306,6 +363,78 @@ def execute_autodial_call(
     now_utc = datetime.now(timezone.utc)
     transcript = []
     demo_booking_data = None
+    real_carrier_info = None
+
+    # Handle genuine carrier outbound call if live mode requested
+    if req.calling_mode == "real":
+        if req.telephony_provider == "twilio":
+            from app.services.telephony.twilio import TwilioTelephonyProvider
+            twilio = TwilioTelephonyProvider(
+                account_sid=req.twilio_account_sid,
+                auth_token=req.twilio_auth_token,
+                virtual_number=req.twilio_from_number
+            )
+            carrier_resp = await twilio.initiate_call(
+                to_phone=lead.phone_number,
+                metadata={
+                    "contact_name": name,
+                    "college_name": college,
+                    "preferred_language": lang
+                }
+            )
+            if not carrier_resp.get("success"):
+                return {
+                    "success": False,
+                    "lead_id": lead.id,
+                    "contact_name": lead.contact_name,
+                    "college_name": lead.college_name,
+                    "phone_number": lead.phone_number,
+                    "status": "failed",
+                    "outcome": "carrier_failed",
+                    "is_demo_booked": False,
+                    "demo_booking": None,
+                    "duration_seconds": 0,
+                    "error": carrier_resp.get("error", "Carrier call failed"),
+                    "transcript": [
+                        {"role": "system", "text": f"Carrier Dial Failed: {carrier_resp.get('error')}", "timestamp": "00:00"}
+                    ],
+                    "ai_summary": f"Real carrier dial failed: {carrier_resp.get('error')}"
+                }
+            real_carrier_info = {
+                "provider": "twilio",
+                "sid": carrier_resp.get("provider_call_id"),
+                "status": carrier_resp.get("status")
+            }
+        elif req.telephony_provider == "exotel":
+            from app.services.telephony.exotel import ExotelTelephonyProvider
+            exotel = ExotelTelephonyProvider()
+            carrier_resp = await exotel.initiate_call(
+                to_phone=lead.phone_number,
+                metadata={"contact_name": name, "college_name": college}
+            )
+            if not carrier_resp.get("success"):
+                return {
+                    "success": False,
+                    "lead_id": lead.id,
+                    "contact_name": lead.contact_name,
+                    "college_name": lead.college_name,
+                    "phone_number": lead.phone_number,
+                    "status": "failed",
+                    "outcome": "carrier_failed",
+                    "is_demo_booked": False,
+                    "demo_booking": None,
+                    "duration_seconds": 0,
+                    "error": carrier_resp.get("error", "Exotel call failed"),
+                    "transcript": [
+                        {"role": "system", "text": f"Exotel Dial Failed: {carrier_resp.get('error')}", "timestamp": "00:00"}
+                    ],
+                    "ai_summary": f"Exotel failed to connect to {lead.phone_number}: {carrier_resp.get('error')}"
+                }
+            real_carrier_info = {
+                "provider": "exotel",
+                "sid": carrier_resp.get("provider_call_id"),
+                "status": carrier_resp.get("status")
+            }
     ai_summary = ""
 
     # Generate realistic dialogue based on scenario and language
@@ -407,10 +536,12 @@ def execute_autodial_call(
 
     # 4. Create CallRecord in DB
     duration = 45 if scenario == "demo_requested" else (22 if scenario == "callback_requested" else 18)
+    call_provider = req.telephony_provider if req.calling_mode == "real" else "simulated"
+    provider_id = (real_carrier_info.get("sid") if real_carrier_info else None) or f"auto_{uuid.uuid4().hex[:10]}_{lead.id}"
     call_rec = CallRecord(
         lead_id=lead.id,
-        provider_call_id=f"auto_{uuid.uuid4().hex[:10]}_{lead.id}",
-        provider="simulated",
+        provider_call_id=provider_id,
+        provider=call_provider,
         direction="outbound",
         status="completed",
         outcome=scenario,
@@ -418,7 +549,7 @@ def execute_autodial_call(
         start_time=now_utc - timedelta(seconds=duration),
         end_time=now_utc,
         duration_seconds=duration,
-        cost_inr=round(duration / 60.0 * 0.75, 2),  # Simulated pulse rate ₹0.75/min
+        cost_inr=round(duration / 60.0 * (1.70 if call_provider == "twilio" else 0.75), 2),
         transcript=transcript,
         ai_summary=ai_summary,
         detected_objections=["Proxy attendance concerns"] if scenario == "demo_requested" else []
@@ -476,5 +607,6 @@ def execute_autodial_call(
         "demo_booking": demo_booking_data,
         "duration_seconds": duration,
         "transcript": transcript,
-        "ai_summary": ai_summary
+        "ai_summary": ai_summary,
+        "real_carrier_info": real_carrier_info
     }

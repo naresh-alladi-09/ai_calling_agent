@@ -28,7 +28,13 @@ import {
   Bot,
   User,
   Zap,
-  Activity
+  Activity,
+  Radio,
+  Key,
+  Settings,
+  HelpCircle,
+  Send,
+  Smartphone
 } from 'lucide-react';
 
 // Web Audio synthesizer for phone sound effects (Zero external files needed, 100% Free)
@@ -143,6 +149,21 @@ export default function AutoDialerPage() {
   const [dialSpeed, setDialSpeed] = useState('live'); // 'live' (turn-by-turn speech) or 'turbo' (fast)
   const [forcedOutcome, setForcedOutcome] = useState('auto'); // 'auto', 'demo_requested', 'callback_requested', 'not_interested'
   
+  // Real calling vs Simulation mode
+  const [callingMode, setCallingMode] = useState('simulated'); // 'simulated' or 'real'
+  const [telephonyProvider, setTelephonyProvider] = useState('twilio'); // 'twilio' or 'exotel'
+  const [showCarrierSettings, setShowCarrierSettings] = useState(false);
+  const [twilioConfig, setTwilioConfig] = useState({
+    accountSid: '',
+    authToken: '',
+    fromNumber: ''
+  });
+
+  // Direct single phone test calling
+  const [testPhoneNumber, setTestPhoneNumber] = useState('');
+  const [isTestingCall, setIsTestingCall] = useState(false);
+  const [testCallStatus, setTestCallStatus] = useState(null);
+
   // Active call state
   const [activeCallStage, setActiveCallStage] = useState('idle'); // 'idle', 'ringing', 'connected', 'ended'
   const [currentLead, setCurrentLead] = useState(null);
@@ -168,8 +189,15 @@ export default function AutoDialerPage() {
   // Timer interval ref
   const timerIntervalRef = useRef(null);
 
-  // Load sample leads initially if queue is empty
+  // Load saved Twilio credentials from localStorage & load sample leads initially
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem('nani_twilio_config');
+      if (saved) {
+        setTwilioConfig(JSON.parse(saved));
+      }
+    } catch (e) {}
+
     loadSampleLeads();
     return () => {
       audioSynth.stopRing();
@@ -177,6 +205,13 @@ export default function AutoDialerPage() {
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
+
+  const saveTwilioCredentials = (newConfig) => {
+    setTwilioConfig(newConfig);
+    try {
+      localStorage.setItem('nani_twilio_config', JSON.stringify(newConfig));
+    } catch (e) {}
+  };
 
   // Web Speech API helper
   const speakText = (text, lang) => {
@@ -334,6 +369,52 @@ export default function AutoDialerPage() {
   // Sleep utility
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+  // Direct Real Phone Call Test
+  const handleTestRealPhoneCall = async () => {
+    if (!testPhoneNumber) {
+      alert("Please enter a mobile phone number to test (e.g. +919876543210)");
+      return;
+    }
+    if (telephonyProvider === 'twilio' && (!twilioConfig.accountSid || !twilioConfig.authToken)) {
+      alert("Please enter your Twilio Account SID and Auth Token below first!");
+      setShowCarrierSettings(true);
+      return;
+    }
+
+    setIsTestingCall(true);
+    setTestCallStatus({ state: 'calling', message: `Placing outbound call to ${testPhoneNumber}...` });
+
+    try {
+      const res = await api.post('/auto-dialer/test-real-call', {
+        phone_number: testPhoneNumber,
+        telephony_provider: telephonyProvider,
+        account_sid: twilioConfig.accountSid,
+        auth_token: twilioConfig.authToken,
+        from_number: twilioConfig.fromNumber,
+        preferred_language: 'te'
+      });
+
+      if (res.data.success) {
+        setTestCallStatus({
+          state: 'success',
+          message: `Ring initiated! Call SID: ${res.data.provider_call_id}. Your phone should ring shortly.`
+        });
+      } else {
+        setTestCallStatus({
+          state: 'error',
+          message: res.data.error || 'Carrier returned an error initiating the call.'
+        });
+      }
+    } catch (err) {
+      setTestCallStatus({
+        state: 'error',
+        message: err.response?.data?.detail || err.message || 'Call failed to reach carrier gateway.'
+      });
+    } finally {
+      setIsTestingCall(false);
+    }
+  };
+
   // Run a single outbound call
   const callSingleLead = async (lead) => {
     setCurrentLead(lead);
@@ -342,7 +423,7 @@ export default function AutoDialerPage() {
     setCallTimer(0);
     setLastOutcome(null);
 
-    if (voiceAudioEnabled) {
+    if (voiceAudioEnabled && callingMode === 'simulated') {
       audioSynth.playRing();
     }
 
@@ -352,7 +433,7 @@ export default function AutoDialerPage() {
       setCallTimer(t => t + 1);
     }, 1000);
 
-    // Simulated ringing delay
+    // Ringing delay
     const ringTime = dialSpeed === 'turbo' ? 400 : 2000;
     await sleep(ringTime);
 
@@ -364,7 +445,7 @@ export default function AutoDialerPage() {
     }
 
     // Call connected!
-    if (voiceAudioEnabled) {
+    if (voiceAudioEnabled && callingMode === 'simulated') {
       audioSynth.playConnect();
     }
     setActiveCallStage('connected');
@@ -380,7 +461,12 @@ export default function AutoDialerPage() {
         designation: lead.designation,
         preferred_language: lead.preferred_language || 'te',
         email: lead.email,
-        forced_outcome: forcedOutcome === 'auto' ? null : forcedOutcome
+        forced_outcome: forcedOutcome === 'auto' ? null : forcedOutcome,
+        calling_mode: callingMode,
+        telephony_provider: telephonyProvider,
+        twilio_account_sid: twilioConfig.accountSid,
+        twilio_auth_token: twilioConfig.authToken,
+        twilio_from_number: twilioConfig.fromNumber
       };
       const res = await api.post('/auto-dialer/dial-lead', payload);
       callData = res.data;
@@ -394,8 +480,8 @@ export default function AutoDialerPage() {
         outcome: 'failed',
         is_demo_booked: false,
         duration_seconds: 5,
-        transcript: [{ role: 'system', text: 'Call failed to connect to network pulse', timestamp: '00:00' }],
-        ai_summary: 'Network simulation error'
+        transcript: [{ role: 'system', text: 'Call failed to connect to network carrier pulse', timestamp: '00:00' }],
+        ai_summary: 'Network carrier connection error'
       };
     }
 
@@ -415,10 +501,9 @@ export default function AutoDialerPage() {
       setCurrentTranscript([...displayedTurns]);
 
       if (dialSpeed === 'live') {
-        if (voiceAudioEnabled && turn.role !== 'system') {
+        if (voiceAudioEnabled && callingMode === 'simulated' && turn.role !== 'system') {
           await speakText(turn.text, lead.preferred_language);
         } else {
-          // Normal pause if muted
           await sleep(1400);
         }
       } else {
@@ -427,7 +512,7 @@ export default function AutoDialerPage() {
     }
 
     // Finish call
-    if (voiceAudioEnabled) {
+    if (voiceAudioEnabled && callingMode === 'simulated') {
       audioSynth.playHangup();
     }
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -444,6 +529,8 @@ export default function AutoDialerPage() {
       phone_number: lead.phone_number,
       designation: lead.designation,
       preferred_language: lead.preferred_language,
+      calling_mode: callingMode,
+      carrier_info: callData.real_carrier_info,
       outcome: callData.outcome,
       is_demo_booked: callData.is_demo_booked,
       demo_booking: callData.demo_booking,
@@ -472,11 +559,21 @@ export default function AutoDialerPage() {
       return;
     }
 
+    if (callingMode === 'real') {
+      if (telephonyProvider === 'twilio' && (!twilioConfig.accountSid || !twilioConfig.authToken)) {
+        alert("You have selected REAL CARRIER CALLING. Please enter your Twilio credentials first, or switch to the Free Sandbox.");
+        setShowCarrierSettings(true);
+        return;
+      }
+      if (!window.confirm(`You are about to place REAL PHONE CALLS to ${leads.length} contacts via ${telephonyProvider.toUpperCase()}. Proceed?`)) {
+        return;
+      }
+    }
+
     stopRequestedRef.current = false;
     setIsDialing(true);
     setIsPaused(false);
 
-    // Find first uncalled or start from 0
     let startIdx = currentIndex + 1;
     if (startIdx >= leads.length || startIdx < 0) {
       startIdx = 0;
@@ -531,11 +628,12 @@ export default function AutoDialerPage() {
       return;
     }
 
-    let csvContent = "Contact Name,College / Organization,Phone Number,Designation,Language,Duration (s),Call Outcome,Okay For Demo?,Demo Scheduled Date & Time,AI Call Summary\n";
+    let csvContent = "Contact Name,College / Organization,Phone Number,Designation,Language,Calling Mode,Duration (s),Call Outcome,Okay For Demo?,Demo Scheduled Date & Time,Carrier SID,AI Call Summary\n";
     results.forEach(r => {
       const demoDate = r.demo_booking ? `${r.demo_booking.scheduled_date} ${r.demo_booking.scheduled_time}` : 'N/A';
       const cleanSummary = (r.ai_summary || '').replace(/,/g, ';').replace(/"/g, '""');
-      csvContent += `"${r.contact_name}","${r.college_name}","${r.phone_number}","${r.designation || ''}","${r.preferred_language}","${r.duration_seconds}","${r.outcome}","${r.is_demo_booked ? 'YES' : 'NO'}","${demoDate}","${cleanSummary}"\n`;
+      const sid = r.carrier_info?.sid || 'N/A';
+      csvContent += `"${r.contact_name}","${r.college_name}","${r.phone_number}","${r.designation || ''}","${r.preferred_language}","${r.calling_mode}","${r.duration_seconds}","${r.outcome}","${r.is_demo_booked ? 'YES' : 'NO'}","${demoDate}","${sid}","${cleanSummary}"\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -558,20 +656,36 @@ export default function AutoDialerPage() {
 
   return (
     <div className="space-y-8 pb-16">
-      {/* 100% Free Guarantee Header Banner */}
+      {/* Header Banner with Calling Mode Switcher */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-950 via-indigo-950 to-slate-900 border border-blue-500/30 p-6 shadow-2xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>100% Free Automated Calling Sandbox • Zero Carrier Costs</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                callingMode === 'real'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+              }`}>
+                <Radio className={`w-3.5 h-3.5 ${callingMode === 'real' ? 'animate-pulse' : ''}`} />
+                <span>{callingMode === 'real' ? 'LIVE CARRIER CALLING (Real Phone Lines)' : '100% Free Virtual Sandbox Mode'}</span>
+              </span>
+              
+              <button
+                type="button"
+                onClick={() => setShowCarrierSettings(!showCarrierSettings)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition-all"
+              >
+                <Settings className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Carrier Setup & API Keys</span>
+              </button>
             </div>
+
             <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-              CSV Client Auto-Dialer & Demo Qualifier
+              Client Auto-Dialer & Demo Qualifier
             </h1>
             <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
-              Upload your client spreadsheet. The AI dials each lead, answers naturally in Telugu or English, pitches the Student Management System, and instantly categorizes whether they are <strong>OK for a demo</strong> or decline—all appearing live on this screen.
+              Upload your client spreadsheet. The AI dials each lead, answers naturally in Telugu or English, pitches the Student Management System, and instantly categorizes whether they are <strong>OK for a demo</strong> or decline.
             </p>
           </div>
 
@@ -582,7 +696,7 @@ export default function AutoDialerPage() {
               title="Download standard CSV format with College, Contact, Phone & Language headers"
             >
               <Download className="w-4 h-4 text-blue-400" />
-              <span>Sample CSV Template</span>
+              <span>Sample CSV</span>
             </button>
 
             <button
@@ -591,11 +705,115 @@ export default function AutoDialerPage() {
               title="Preload 5 Andhra & Telangana College Principals"
             >
               <FileSpreadsheet className="w-4 h-4 text-blue-400" />
-              <span>Load Sample Leads (1-Click)</span>
+              <span>Load 5 Leads</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Real Carrier Settings Drawer (Expandable) */}
+      {showCarrierSettings && (
+        <div className="p-6 rounded-2xl bg-slate-900 border border-cyan-500/30 shadow-2xl space-y-5 animate-fade-in">
+          <div className="flex items-center justify-between pb-3 border-b border-white/10">
+            <div className="flex items-center gap-2.5">
+              <Key className="w-5 h-5 text-cyan-400" />
+              <h3 className="text-sm font-bold text-white">Telephony Gateway Configuration (Real Carrier Calling)</h3>
+            </div>
+            <button
+              onClick={() => setShowCarrierSettings(false)}
+              className="text-xs text-slate-400 hover:text-white"
+            >
+              ✕ Close
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Telephony Provider</label>
+              <select
+                value={telephonyProvider}
+                onChange={(e) => setTelephonyProvider(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
+              >
+                <option value="twilio">Twilio (Recommended for Free Trial / Global Calling)</option>
+                <option value="exotel">Exotel (Indian Cloud Telephony)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Twilio Account SID</label>
+              <input
+                type="text"
+                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                value={twilioConfig.accountSid}
+                onChange={(e) => saveTwilioCredentials({ ...twilioConfig, accountSid: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Twilio Auth Token</label>
+              <input
+                type="password"
+                placeholder="Auth Token"
+                value={twilioConfig.authToken}
+                onChange={(e) => saveTwilioCredentials({ ...twilioConfig, authToken: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Virtual Caller ID Number (From)</label>
+              <input
+                type="text"
+                placeholder="+1205xxxxxxx or Twilio Number"
+                value={twilioConfig.fromNumber}
+                onChange={(e) => saveTwilioCredentials({ ...twilioConfig, fromNumber: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs"
+              />
+            </div>
+
+            <div className="md:col-span-2 flex items-center justify-between p-3 rounded-xl bg-blue-950/40 border border-blue-500/20 text-[11px] text-slate-300">
+              <div>
+                <span className="font-semibold text-blue-400">💡 Free Twilio Trial Guide: </span>
+                You can create a free account at <code>twilio.com</code>, receive $15.50 in free calling credit and a free number to dial your phone immediately without paying.
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Test Single Phone Call Tool */}
+          <div className="pt-4 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex-1 w-full flex items-center gap-3">
+              <Smartphone className="w-5 h-5 text-emerald-400 shrink-0" />
+              <input
+                type="tel"
+                placeholder="Enter your real phone to test (e.g. +919876543210)"
+                value={testPhoneNumber}
+                onChange={(e) => setTestPhoneNumber(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-xs text-white font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleTestRealPhoneCall}
+                disabled={isTestingCall}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs whitespace-nowrap shadow-md disabled:opacity-50"
+              >
+                {isTestingCall ? "Dialing..." : "📞 Ring My Phone Now"}
+              </button>
+            </div>
+
+            {testCallStatus && (
+              <div className={`text-xs px-3 py-2 rounded-xl border ${
+                testCallStatus.state === 'success' ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' :
+                testCallStatus.state === 'error' ? 'bg-rose-950/60 border-rose-500/50 text-rose-300' :
+                'bg-slate-800 text-slate-300 border-slate-700'
+              }`}>
+                {testCallStatus.message}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* KPI Counters */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -695,10 +913,41 @@ export default function AutoDialerPage() {
 
           {/* Calling Controls & Simulation Mode */}
           <div className="p-5 rounded-2xl bg-slate-900/70 border border-white/10 backdrop-blur-md space-y-4">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-cyan-400" />
-              <span>Dialer Control Center</span>
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Zap className="w-4 h-4 text-cyan-400" />
+                <span>Dialer Control Center</span>
+              </h2>
+
+              {/* Mode Toggle Pills */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setCallingMode('simulated')}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    callingMode === 'simulated'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Free Sandbox
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCallingMode('real');
+                    if (!twilioConfig.accountSid) setShowCarrierSettings(true);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    callingMode === 'real'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Real Calling
+                </button>
+              </div>
+            </div>
 
             {/* Audio & Speed Controls */}
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -746,7 +995,7 @@ export default function AutoDialerPage() {
                 onChange={(e) => setForcedOutcome(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
               >
-                <option value="auto">Natural AI Simulation (55% Demos, 20% Callbacks, 15% Info, 10% No)</option>
+                <option value="auto">Natural AI Conversation (55% Demos, 20% Callbacks, 15% Info, 10% No)</option>
                 <option value="demo_requested">Force Test: Always Book Demo (100% OK for Demo)</option>
                 <option value="callback_requested">Force Test: Always Callback Requested</option>
                 <option value="not_interested">Force Test: Decline / Existing ERP</option>
@@ -760,10 +1009,14 @@ export default function AutoDialerPage() {
                   type="button"
                   onClick={handleStartDialing}
                   disabled={leads.length === 0}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs transition-all shadow-lg shadow-emerald-900/30 disabled:opacity-50"
+                  className={`flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-xs transition-all shadow-lg disabled:opacity-50 text-white ${
+                    callingMode === 'real'
+                      ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 shadow-rose-900/30'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-900/30'
+                  }`}
                 >
                   <PhoneCall className="w-4 h-4" />
-                  <span>Start Calling Clients ({leads.length})</span>
+                  <span>{callingMode === 'real' ? `Call Real Clients (${leads.length})` : `Start Free Calling (${leads.length})`}</span>
                 </button>
               ) : (
                 <>
@@ -875,15 +1128,22 @@ export default function AutoDialerPage() {
                 <div className="flex items-center gap-3">
                   <div className={`w-3.5 h-3.5 rounded-full ${
                     activeCallStage === 'ringing' ? 'bg-amber-400 animate-ping' :
-                    activeCallStage === 'connected' ? 'bg-emerald-400 animate-pulse' :
+                    activeCallStage === 'connected' ? (callingMode === 'real' ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400 animate-pulse') :
                     'bg-slate-600'
                   }`} />
                   <div>
-                    <h3 className="text-sm font-semibold text-white">
-                      {activeCallStage === 'idle' && "Virtual Caller Terminal"}
-                      {activeCallStage === 'ringing' && "Dialing Client..."}
-                      {activeCallStage === 'connected' && "Live Outbound Call in Progress"}
-                      {activeCallStage === 'ended' && "Call Finished • Outcome Analyzed"}
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <span>
+                        {activeCallStage === 'idle' && "Virtual Caller Terminal"}
+                        {activeCallStage === 'ringing' && (callingMode === 'real' ? "Carrier Dialing Physical Phone..." : "Dialing Client...")}
+                        {activeCallStage === 'connected' && (callingMode === 'real' ? "🔴 Live Carrier Call In Progress" : "Live Outbound Call in Progress")}
+                        {activeCallStage === 'ended' && "Call Finished • Outcome Analyzed"}
+                      </span>
+                      {callingMode === 'real' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold uppercase">
+                          Real Phone Line
+                        </span>
+                      )}
                     </h3>
                     <p className="text-[11px] text-slate-400">
                       Pitching: Student Management System (QR Attendance & Shortage Automation)
@@ -935,7 +1195,11 @@ export default function AutoDialerPage() {
                   <div className="w-12 h-12 rounded-full border-2 border-amber-400/40 border-t-amber-400 animate-spin flex items-center justify-center">
                     <PhoneCall className="w-5 h-5 text-amber-400 animate-pulse" />
                   </div>
-                  <div className="text-xs">Ringing client's mobile phone...</div>
+                  <div className="text-xs">
+                    {callingMode === 'real'
+                      ? `Routing call via ${telephonyProvider.toUpperCase()} carrier network to real phone...`
+                      : "Ringing client's mobile phone..."}
+                  </div>
                 </div>
               )}
 
@@ -995,6 +1259,8 @@ export default function AutoDialerPage() {
                   ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-200'
                   : lastOutcome.outcome === 'callback_requested'
                   ? 'bg-amber-950/90 border-amber-500/50 text-amber-200'
+                  : lastOutcome.outcome === 'carrier_failed'
+                  ? 'bg-rose-950/90 border-rose-500/50 text-rose-200'
                   : 'bg-slate-900/90 border-slate-700 text-slate-300'
               }`}>
                 <div className="flex items-center justify-between">
@@ -1012,11 +1278,18 @@ export default function AutoDialerPage() {
                           ? "🎉 CLIENT OKAY FOR DEMO • DEMO BOOKED!"
                           : lastOutcome.outcome === 'callback_requested'
                           ? "📞 CALLBACK REQUESTED"
+                          : lastOutcome.outcome === 'carrier_failed'
+                          ? "⚠️ REAL CARRIER ERROR"
                           : "⚪ CLIENT DECLINED / CURRENTLY NOT INTERESTED"}
                       </div>
                       <div className="text-[11px] opacity-90 mt-0.5">
-                        {lastOutcome.ai_summary}
+                        {lastOutcome.ai_summary || lastOutcome.error}
                       </div>
+                      {lastOutcome.real_carrier_info && (
+                        <div className="text-[10px] text-cyan-300 mt-1 font-mono">
+                          Carrier SID: {lastOutcome.real_carrier_info.sid} ({lastOutcome.real_carrier_info.provider})
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1077,7 +1350,7 @@ export default function AutoDialerPage() {
                 <th className="py-3 px-3">Client Name</th>
                 <th className="py-3 px-3">College / Institution</th>
                 <th className="py-3 px-3">Phone</th>
-                <th className="py-3 px-3">Lang</th>
+                <th className="py-3 px-3">Mode</th>
                 <th className="py-3 px-3">Duration</th>
                 <th className="py-3 px-3">Demo Qualification Status</th>
                 <th className="py-3 px-3 text-right">Actions</th>
@@ -1087,7 +1360,7 @@ export default function AutoDialerPage() {
               {results.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-10 text-center text-slate-500">
-                    No calls executed yet. Click "Start Calling Clients" above to begin dialing.
+                    No calls executed yet. Click "Start Free Calling" or "Call Real Clients" above to begin dialing.
                   </td>
                 </tr>
               ) : (
@@ -1100,8 +1373,12 @@ export default function AutoDialerPage() {
                     <td className="py-3 px-3 text-slate-300">{r.college_name}</td>
                     <td className="py-3 px-3 font-mono text-cyan-300">{r.phone_number}</td>
                     <td className="py-3 px-3">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300">
-                        {r.preferred_language || 'te'}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                        r.calling_mode === 'real'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {r.calling_mode === 'real' ? 'Real Phone' : 'Sandbox'}
                       </span>
                     </td>
                     <td className="py-3 px-3 font-mono text-slate-400">{r.duration_seconds}s</td>
@@ -1127,6 +1404,11 @@ export default function AutoDialerPage() {
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
                           <Info className="w-3.5 h-3.5" />
                           <span>Brochure Sent</span>
+                        </span>
+                      ) : r.outcome === 'carrier_failed' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-950/60 text-rose-300 border border-rose-700">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                          <span>Carrier Error</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
@@ -1178,6 +1460,12 @@ export default function AutoDialerPage() {
                 <span className="font-semibold text-slate-100">AI Call Summary: </span>
                 {selectedTranscriptLead.ai_summary}
               </div>
+
+              {selectedTranscriptLead.carrier_info?.sid && (
+                <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] text-cyan-300 font-mono">
+                  Real Carrier SID: {selectedTranscriptLead.carrier_info.sid}
+                </div>
+              )}
 
               {selectedTranscriptLead.transcript?.map((t, idx) => (
                 <div
