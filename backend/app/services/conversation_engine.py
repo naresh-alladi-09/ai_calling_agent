@@ -58,14 +58,14 @@ class ConversationEngine:
         """
         # Telugu Unicode range: \u0c00-\u0c7f
         telugu_chars = re.findall(r'[\u0C00-\u0C7F]', text)
-        if len(telugu_chars) >= 2:
+        if len(telugu_chars) >= 1:
             return "te"
 
         # Common romanized Telugu words
         telugu_romanized = [
-            "namaskaram", "cheppandi", "cheppandi", "ledu", "avunu", "kavali", "vaddu", 
+            "namaskaram", "cheppandi", "ledu", "avunu", "kavali", "vaddu", 
             "matladandi", "evaru", "repu", "tarvata", "principal", "vundi", "unnadi",
-            "pampandi", "enti", "ela", "babu", "andi"
+            "pampandi", "enti", "ela", "babu", "andi", "dhara", "chudandi", "ivvandi"
         ]
         words = text.lower().split()
         for w in words:
@@ -73,7 +73,7 @@ class ConversationEngine:
                 return "te"
 
         # Check for English indicators
-        english_words = ["yes", "no", "hello", "hi", "busy", "send", "email", "price", "demo", "software", "call"]
+        english_words = ["yes", "no", "hello", "hi", "busy", "send", "email", "price", "demo", "software", "call", "schedule"]
         english_matches = sum(1 for w in words if w in english_words)
         if english_matches >= 1 and len(telugu_chars) == 0:
             return "en"
@@ -109,7 +109,9 @@ class ConversationEngine:
         # 1. OPT-OUT / DND CHECK (Highest Priority Rule)
         opt_out_phrases = [
             "don't call", "do not call", "stop calling", "remove my number", "block me", 
-            "dnd", "malli call cheyoddu", "call cheyoddu", "ivvi vaddu", "number theeyandi", "opt out"
+            "dnd", "malli call cheyoddu", "call cheyoddu", "ivvi vaddu", "number theeyandi", "opt out",
+            "కాల్ చేయవద్దు", "కాల్ చేయొద్దు", "నంబర్ తొలగించండి", "నంబర్‌ను తొలగించండి", "నంబర్ తీసేయండి",
+            "లిస్ట్ నుండి తొలగించండి", "కాల్స్ వద్దు", "మళ్ళీ కాల్ చేయవద్దు", "మళ్ళీ కాల్ చేయొద్దు", "బ్లాక్ చేయండి", "తొలగించండి"
         ]
         if any(p in lower_input for p in opt_out_phrases):
             if lang == "te":
@@ -131,7 +133,8 @@ class ConversationEngine:
         # 2. IMMEDIATE REFUSAL / NOT INTERESTED CHECK
         not_interested_phrases = [
             "not interested", "no interest", "don't want", "dont want", "interest ledu", 
-            "vaddu", "avsaram ledu", "avasaram ledu", "no thanks"
+            "vaddu", "avsaram ledu", "avasaram ledu", "no thanks",
+            "ఆసక్తి లేదు", "వద్దు", "అవసరం లేదు", "ఇంట్రెస్ట్ లేదు", "థాంక్స్ వద్దు", "మాకు వద్దు", "ఆసక్తి"
         ]
         if any(p in lower_input for p in not_interested_phrases):
             if lang == "te":
@@ -151,7 +154,13 @@ class ConversationEngine:
             }
 
         # 3. BUSY / CALL LATER CHECK
-        busy_phrases = ["busy", "call later", "call tomorrow", "meeting", "class", "tarvata call cheyandi", "repu call cheyandi", "class lo unnanu", "meeting lo unnanu"]
+        busy_phrases = [
+            "busy", "call later", "call tomorrow", "meeting", "class", "lecture",
+            "tarvata call cheyandi", "repu call cheyandi", "class lo unnanu", "meeting lo unnanu",
+            "బిజీ", "బిజీగా ఉన్నాను", "క్లాస్‌లో ఉన్నాను", "క్లాస్ లో ఉన్నాను", "క్లాస్",
+            "మీటింగ్‌లో ఉన్నాను", "మీటింగ్ లో ఉన్నాను", "మీటింగ్", "రేపు కాల్ చేయండి",
+            "తర్వాత కాల్ చేయండి", "తర్వాత మాట్లాడండి", "మళ్ళీ కాల్ చేయండి"
+        ]
         if any(p in lower_input for p in busy_phrases):
             if lang == "te":
                 reply = "సరేనండి, మీరు బిజీగా ఉన్నారని అర్థమైంది. నేను మీకు వీలైనప్పుడు లేదా రేపు మళ్ళీ కాల్ చేస్తాను. ధన్యవాదాలు!"
@@ -186,117 +195,40 @@ class ConversationEngine:
         lead: CollegeLead,
         lang: str
     ) -> Dict[str, Any]:
-        lower = user_input.lower()
+        lower = user_input.lower().strip()
         objections = []
 
-        # Objection: Already have software / ERP
-        if any(k in lower for k in ["already have", "already using", "erp undi", "software undi", "we use software", "we have software"]):
-            objections.append("Already using existing software/ERP")
-            if lang == "te":
-                reply = (
-                    "చాలా మంచిదండి! చాలా కాలేజీలు ఇప్పటికే ERP వాడుతున్నాయి, కానీ చాలా చోట్ల స్టూడెంట్స్ ప్రాక్సీ అటెండెన్స్ వేయడం పెద్ద సమస్యగా మారింది. "
-                    "మా సాఫ్ట్‌వేర్‌లో 30 సెకండ్ల dynamic expiring QR కోడ్ ఉంటుంది, దీనివల్ల ప్రాక్సీలు పూర్తిగా ఆగిపోతాయి. అంతేకాక 75% అటెండెన్స్ షార్టేజ్ ఆటోమేటిక్‌గా లెక్కిస్తుంది. "
-                    "ఒక 10 నిమిషాల ఆన్‌లైన్ డెమోలో ఇది మీ కాలేజీకి ఎలా సరిపోతుందో చూపించవచ్చా అండి?"
-                )
-            else:
-                reply = (
-                    "That is great! Many colleges already have an ERP, but faculty frequently face proxy attendance issues. "
-                    "Our system features a 30-second expiring dynamic QR code that prevents proxy check-ins completely, along with automated 75% shortage calculation. "
-                    "Would you be open to a quick 10-minute online walkthrough this week?"
-                )
-            return {
-                "agent_response": reply,
-                "detected_language": lang,
-                "call_status": "in_progress",
-                "outcome": "interested",
-                "detected_objections": objections,
-                "opt_out_detected": False,
-                "demo_booking": None,
-                "ai_summary": "Prospect has existing software. Agent highlighted proxy-proof expiring QR attendance.",
-            }
+        # A. Explicit Demo Booking / Scheduling Agreement
+        demo_booking_phrases = [
+            "schedule a demo", "schedule demo", "online demo", "book demo", "book a demo", 
+            "show me a demo", "demo tomorrow", "schedule tomorrow", "schedule an online demo",
+            "డెమో షెడ్యూల్", "డెమో కావాలి", "డెమో చూడవచ్చు", "డెమో ఏర్పాటు", "రేపు డెమో", "డెమో ఇవ్వండి",
+            "demo schedule cheyandi", "demo kavali"
+        ]
+        is_explicit_demo_request = any(k in lower for k in demo_booking_phrases)
 
-        # Objection: Manual attendance
-        if any(k in lower for k in ["manual", "paper", "register", "pusthakam", "manual attendance"]):
-            objections.append("Using manual paper registers")
-            if lang == "te":
-                reply = (
-                    "అవునండి, మాన్యువల్ రిజిస్టర్లలో సంతకాలు తీసుకోవడం వల్ల ప్రతి నెలా 75% అటెండెన్స్ షార్టేజ్ మరియు UGC పర్సంటేజీలు లెక్కించడానికి అధ్యాపకులకు గంటల సమయం పడుతుంది. "
-                    "మా సిస్టమ్ కేవలం ఒక్క క్లిక్‌తో అటెండెన్స్ షార్టేజ్ నోటీసులను ఆటోమేటిక్‌గా తయారుచేస్తుంది. "
-                    "దీనిపై ఒక చిన్న 10 నిమిషాల డెమో చూడడానికి మీకు ఆసక్తి ఉందా అండి?"
-                )
-            else:
-                reply = (
-                    "Indeed, paper registers require faculty to spend hours manually tallying shortage percentages and UGC reports every month. "
-                    "Our mathematical shortage engine automates 75% eligibility reports and alerts students instantly. "
-                    "May we show your department a quick 10-minute demo?"
-                )
-            return {
-                "agent_response": reply,
-                "detected_language": lang,
-                "call_status": "in_progress",
-                "outcome": "interested",
-                "detected_objections": objections,
-                "opt_out_detected": False,
-                "demo_booking": None,
-                "ai_summary": "College currently uses manual registers. Agent explained automated shortage engine.",
-            }
+        # Also check if user agrees to demo after agent previously offered it
+        last_agent_text = ""
+        for turn in reversed(dialog_history):
+            if turn.get("role") in ["agent", "assistant"]:
+                last_agent_text = turn.get("text", "").lower()
+                break
+        
+        agent_asked_for_demo = any(k in last_agent_text for k in ["డెమో", "demo", "walkthrough", "షెడ్యూల్"])
+        user_confirms_demo = agent_asked_for_demo and any(k in lower for k in [
+            "yes", "ok", "okay", "sure", "sare", "avunu", "repu", "tomorrow", "11:30", "morning",
+            "రేపు", "సరే", "సరేనండి", "ఉదయం", "ఖచ్చితంగా"
+        ])
 
-        # Objection: Price / Cost
-        if any(k in lower for k in ["price", "cost", "entha", "fees", "pricing", "budget"]):
-            objections.append("Pricing inquiry")
-            if lang == "te":
-                reply = (
-                    "ధర మీ కాలేజీలోని మొత్తం విద్యార్థుల సంఖ్యను బట్టి చాలా సరసమైన వార్షిక రుసుముగా ఉంటుంది అండి. "
-                    "ఒక 10 నిమిషాల డెమోలో మీ కాలేజీ అవసరాలను బట్టి ఖచ్చితమైన కొటేషన్ ఇస్తాము. ఈ గురువారం లేదా శుక్రవారం డెమో షెడ్యూల్ చేయవచ్చా అండి?"
-                )
-            else:
-                reply = (
-                    "Our pricing is structured transparently and affordably based on your institution's total student enrollment. "
-                    "Our technical team provides an exact quotation during a 10-minute demo. Could we schedule a session for this Thursday or Friday?"
-                )
-            return {
-                "agent_response": reply,
-                "detected_language": lang,
-                "call_status": "in_progress",
-                "outcome": "interested",
-                "detected_objections": objections,
-                "opt_out_detected": False,
-                "demo_booking": None,
-                "ai_summary": "Inquired about pricing. Agent offered demo for exact quotation.",
-            }
-
-        # Objection: Send email / details
-        if any(k in lower for k in ["send details", "send email", "mail cheyandi", "whatsapp", "details pampandi", "send brochure"]):
-            objections.append("Requested information via email")
-            if lang == "te":
-                reply = (
-                    "ఖచ్చితంగా అండి! మీకు పూర్తి వివరాలు ఈమెయిల్ ద్వారా పంపిస్తాను. అలాగే లైవ్ QR అటెండెన్స్ మరియు SGPA క్యాలిక్యులేషన్ ఎలా పనిచేస్తుందో చూడడానికి రేపు ఒక 10 నిమిషాల డెమో షెడ్యూల్ చేయవచ్చా అండి?"
-                )
-            else:
-                reply = (
-                    "Certainly! I will gladly send our product brochure to your email. Would you also be open to a 10-minute online demonstration tomorrow to see the live QR check-in firsthand?"
-                )
-            return {
-                "agent_response": reply,
-                "detected_language": lang,
-                "call_status": "in_progress",
-                "outcome": "info_requested",
-                "detected_objections": objections,
-                "opt_out_detected": False,
-                "demo_booking": None,
-                "ai_summary": "Prospect requested details via email; invited for live demonstration.",
-            }
-
-        # Demo agreement / Positive confirmation
-        if any(k in lower for k in ["yes", "ok", "okay", "sure", "sare", "avunu", "demo", "schedule", "repu", "thursday", "friday", "tomorrow"]):
+        if is_explicit_demo_request or user_confirms_demo:
             date_str = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
             time_str = "11:30 AM IST"
             
             if lang == "te":
                 reply = (
-                    f"చాలా సంతోషం అండి! మీ డెమోని రేపు ఉదయం 11:30 గంటలకు షెడ్యూల్ చేస్తున్నాను. "
-                    f"మా టెక్నికల్ టీమ్ మీతో కనెక్ట్ అయ్యి QR అటెండెన్స్ మరియు స్టూడెంట్ మేనేజ్‌మెంట్ సిస్టమ్ పూర్తి ఫీచర్లను వివరిస్తుంది. "
-                    f"మీ విలువైన సమయానికి ధన్యవాదాలు {lead.contact_name} గారు!"
+                    f"చాలా సంతోషం అండి! మీ ఆన్‌లైన్ డెమోని రేపు ఉదయం 11:30 గంటలకు షెడ్యూల్ చేశాను. "
+                    f"మా టెక్నికల్ స్పెషలిస్ట్ మీతో కనెక్ట్ అయ్యి 30 సెకండ్ల Expiring QR Attendance మరియు SGPA గ్రేడింగ్ సిస్టమ్ లైవ్‌గా చూపిస్తారు. "
+                    f"మీ విలువైన సమయానికి చాలా ధన్యవాదాలు {lead.contact_name} గారు!"
                 )
             else:
                 reply = (
@@ -323,7 +255,157 @@ class ConversationEngine:
                 "ai_summary": "Demo successfully confirmed with college administration.",
             }
 
-        # Default discovery fallback
+        # B. Willingness to Listen / Initial Discovery Stage
+        discovery_agreement_phrases = [
+            "two minutes", "tell me what", "tell me more", "go ahead", "what does it do", 
+            "listening", "what is it about", "what your system does",
+            "చెప్పండి", "మాట్లాడండి", "రెండు నిమిషాలు", "వింటాను", "ఏం చేస్తుంది", "ఏమిటి సిస్టమ్", 
+            "వివరాలు చెప్పండి", "సరే చెప్పండి", "చెప్పవచ్చా", "వినవచ్చు"
+        ]
+        if any(k in lower for k in discovery_agreement_phrases):
+            if lang == "te":
+                reply = (
+                    "చాలా సంతోషం అండి! మా స్టూడెంట్ మేనేజ్‌మెంట్ సిస్టమ్‌లో కాలేజీలకు ఎంతో ఉపయోగపడే Expiring QR Attendance ఉంది. "
+                    "క్లాస్‌రూమ్‌లో అధ్యాపకులు 30 సెకండ్ల డైనమిక్ QR కోడ్ ప్రదర్శించవచ్చు, దీనివల్ల స్టూడెంట్స్ ఫోటోలు షేర్ చేసి ప్రాక్సీ అటెండెన్స్ వేయడం పూర్తిగా ఆగిపోతుంది. "
+                    "అలాగే UGC 75% అటెండెన్స్ షార్టేజ్‌ను మరియు సెమిస్టర్ SGPA/CGPA లను సిస్టమ్ ఆటోమేటిక్‌గా లెక్కిస్తుంది. "
+                    "ప్రస్తుతం మీ కాలేజీలో అటెండెన్స్ మాన్యువల్ రిజిస్టర్లలో తీసుకుంటున్నారా లేక ఏదైనా సాఫ్ట్‌వేర్ వాడుతున్నారా అండి?"
+                )
+            else:
+                reply = (
+                    "Thank you! Our Student Management System features an Expiring QR Attendance engine designed specifically for colleges. "
+                    "Faculty generate dynamic 30-second QR codes in class, completely preventing proxy check-ins via shared photos. "
+                    "It also automatically calculates UGC 75% attendance shortage alerts and semester SGPA/CGPA marks. "
+                    "How is student attendance currently handled at your college — via manual paper registers or an existing software?"
+                )
+            return {
+                "agent_response": reply,
+                "detected_language": lang,
+                "call_status": "in_progress",
+                "outcome": "interested",
+                "detected_objections": objections,
+                "opt_out_detected": False,
+                "demo_booking": None,
+                "ai_summary": "Prospect agreed to hear introduction; pitch delivered explaining expiring QR and shortage alerts.",
+            }
+
+        # C. Objection: Already have software / ERP
+        software_phrases = [
+            "already have", "already using", "erp undi", "software undi", "we use software", 
+            "we have software", "existing erp", "have erp", "already an erp",
+            "ఇప్పటికే సాఫ్ట్‌వేర్", "సాఫ్ట్‌వేర్ ఉంది", "సాఫ్ట్‌వేర్ వాడుతున్నాము", "సాఫ్ట్‌వేర్ ఉపయోగిస్తున్నాము", 
+            "ఈఆర్పీ ఉంది", "ఈఆర్పీ", "సిస్టమ్ ఉంది", "కాలేజీలో సాఫ్ట్‌వేర్"
+        ]
+        if any(k in lower for k in software_phrases):
+            objections.append("Already using existing software/ERP")
+            if lang == "te":
+                reply = (
+                    "చాలా మంచిదండి! చాలా కాలేజీలు ఇప్పటికే ERP వాడుతున్నాయి, కానీ స్టూడెంట్స్ ప్రాక్సీ అటెండెన్స్ వేయడం సాధారణ సమస్యగా మారింది. "
+                    "మా సాఫ్ట్‌వేర్‌లో 30 సెకండ్ల dynamic expiring QR కోడ్ ఉంటుంది, దీనివల్ల ప్రాక్సీలు పూర్తిగా నివారించబడతాయి మరియు 75% అటెండెన్స్ షార్టేజ్ ఆటోమేటిక్‌గా లెక్కిస్తుంది. "
+                    "ఒక 10 నిమిషాల ఆన్‌లైన్ డెమోలో ఇది మీ కాలేజీకి ఎలా సరిపోతుందో చూపించవచ్చా అండి?"
+                )
+            else:
+                reply = (
+                    "That is great! Many colleges already have an ERP, but faculty frequently face proxy attendance issues. "
+                    "Our system features a 30-second expiring dynamic QR code that prevents proxy check-ins completely, along with automated 75% shortage calculation. "
+                    "Would you be open to a quick 10-minute online walkthrough this week?"
+                )
+            return {
+                "agent_response": reply,
+                "detected_language": lang,
+                "call_status": "in_progress",
+                "outcome": "interested",
+                "detected_objections": objections,
+                "opt_out_detected": False,
+                "demo_booking": None,
+                "ai_summary": "Prospect has existing software. Agent highlighted proxy-proof expiring QR attendance.",
+            }
+
+        # D. Objection: Manual attendance / Paper registers
+        manual_phrases = [
+            "manual", "paper", "register", "pusthakam", "manual attendance", "paper registers",
+            "మాన్యువల్", "రిజిస్టర్", "రిజిస్టర్‌లో", "పేపర్", "పుస్తకం", "చేత్తో రాస్తాము", "మాన్యువల్ అటెండెన్స్"
+        ]
+        if any(k in lower for k in manual_phrases):
+            objections.append("Using manual paper registers")
+            if lang == "te":
+                reply = (
+                    "అవునండి, మాన్యువల్ రిజిస్టర్లలో సంతకాలు తీసుకోవడం వల్ల ప్రతి నెలా 75% అటెండెన్స్ షార్టేజ్ మరియు UGC పర్సంటేజీలు లెక్కించడానికి అధ్యాపకులకు గంటల సమయం పడుతుంది. "
+                    "మా సిస్టమ్ కేవలం ఒక్క క్లిక్‌తో అటెండెన్స్ షార్టేజ్ నోటీసులను ఆటోమేటిక్‌గా తయారుచేస్తుంది. "
+                    "దీనిపై ఒక చిన్న 10 నిమిషాల డెమో చూడడానికి మీకు ఆసక్తి ఉందా అండి?"
+                )
+            else:
+                reply = (
+                    "Indeed, paper registers require faculty to spend hours manually tallying shortage percentages and UGC reports every month. "
+                    "Our mathematical shortage engine automates 75% eligibility reports and alerts students instantly. "
+                    "May we show your department a quick 10-minute demo?"
+                )
+            return {
+                "agent_response": reply,
+                "detected_language": lang,
+                "call_status": "in_progress",
+                "outcome": "interested",
+                "detected_objections": objections,
+                "opt_out_detected": False,
+                "demo_booking": None,
+                "ai_summary": "College currently uses manual registers. Agent explained automated shortage engine.",
+            }
+
+        # E. Objection: Price / Cost inquiry
+        price_phrases = [
+            "price", "cost", "entha", "fees", "pricing", "budget", "rate", "how much",
+            "ధర", "ధర ఎంత", "ఖర్చు", "ఫీజు", "రేటు", "ఎంత అవుతుంది", "ఎంత ఉంటుంది", "ఎంత"
+        ]
+        if any(k in lower for k in price_phrases):
+            objections.append("Pricing inquiry")
+            if lang == "te":
+                reply = (
+                    "ధర మీ కాలేజీలోని మొత్తం విద్యార్థుల సంఖ్యను బట్టి చాలా సరసమైన వార్షిక రుసుముగా ఉంటుంది అండి. "
+                    "ఒక 10 నిమిషాల డెమోలో మీ కాలేజీ అవసరాలను బట్టి ఖచ్చితమైన కొటేషన్ ఇస్తాము. ఈ గురువారం లేదా శుక్రవారం డెమో షెడ్యూల్ చేయవచ్చా అండి?"
+                )
+            else:
+                reply = (
+                    "Our pricing is structured transparently and affordably based on your institution's total student enrollment. "
+                    "Our technical team provides an exact quotation during a 10-minute demo. Could we schedule a session for this Thursday or Friday?"
+                )
+            return {
+                "agent_response": reply,
+                "detected_language": lang,
+                "call_status": "in_progress",
+                "outcome": "interested",
+                "detected_objections": objections,
+                "opt_out_detected": False,
+                "demo_booking": None,
+                "ai_summary": "Inquired about pricing. Agent offered demo for exact quotation.",
+            }
+
+        # F. Objection: Send email / brochure / details
+        email_phrases = [
+            "send details", "send email", "mail cheyandi", "whatsapp", "details pampandi", "send brochure",
+            "email", "mail me", "brochure",
+            "వివరాలు పంపించండి", "ఈమెయిల్‌కి పంపించండి", "ఈమెయిల్", "మెయిల్ చేయండి", "వాట్సాప్", "బ్రోచర్", "వివరాలు"
+        ]
+        if any(k in lower for k in email_phrases):
+            objections.append("Requested information via email")
+            if lang == "te":
+                reply = (
+                    "ఖచ్చితంగా అండి! మీకు పూర్తి వివరాలు ఈమెయిల్ ద్వారా పంపిస్తాను. అలాగే లైవ్ QR అటెండెన్స్ మరియు SGPA క్యాలిక్యులేషన్ ఎలా పనిచేస్తుందో చూడడానికి రేపు ఒక 10 నిమిషాల డెమో షెడ్యూల్ చేయవచ్చా అండి?"
+                )
+            else:
+                reply = (
+                    "Certainly! I will gladly send our product brochure to your email. Would you also be open to a 10-minute online demonstration tomorrow to see the live QR check-in firsthand?"
+                )
+            return {
+                "agent_response": reply,
+                "detected_language": lang,
+                "call_status": "in_progress",
+                "outcome": "info_requested",
+                "detected_objections": objections,
+                "opt_out_detected": False,
+                "demo_booking": None,
+                "ai_summary": "Prospect requested details via email; invited for live demonstration.",
+            }
+
+        # G. General Discovery / Features Fallback
         if lang == "te":
             reply = (
                 "మా స్టూడెంట్ మేనేజ్‌మెంట్ సిస్టమ్‌లో 3-టయర్ RBAC (అడ్మిన్, టీచర్, స్టూడెంట్), 30 సెకన్ల dynamic QR అటెండెన్స్ మరియు UGC SGPA/CGPA ట్రాకింగ్ ఉన్నాయి అండి. "

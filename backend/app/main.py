@@ -162,16 +162,22 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS setup
+# CORS setup: explicitly allow Vite dev server, preview, and local URLs with credentials
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    settings.FRONTEND_URL
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
+if settings.FRONTEND_URL and settings.FRONTEND_URL not in origins:
+    origins.append(settings.FRONTEND_URL)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Open in dev, restrictable in prod
+    allow_origins=origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -187,6 +193,18 @@ app.include_router(demos_router, prefix="/api")
 app.include_router(compliance_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
+
+
+@app.get("/", tags=["System"])
+def root():
+    return {
+        "name": "Nani AI Sales Caller API",
+        "status": "online",
+        "environment": settings.APP_ENV,
+        "docs_url": "/docs",
+        "health_url": "/api/health",
+        "version": "1.0.0"
+    }
 
 
 @app.get("/api/health", tags=["System"])

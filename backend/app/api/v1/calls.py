@@ -197,10 +197,8 @@ async def simulate_call_start(
     db.commit()
     db.refresh(call)
 
-    # Optional Sarvam audio synthesis
-    audio_b64 = None
-    if settings.SARVAM_API_KEY:
-        audio_b64 = await sarvam_adapter.text_to_speech(opening_text, f"{detected_lang}-IN")
+    # High-fidelity bilingual audio synthesis (Sarvam AI with native gTTS fallback)
+    audio_b64 = await sarvam_adapter.text_to_speech(opening_text, f"{detected_lang}-IN")
 
     return {
         "call_id": call.id,
@@ -271,7 +269,9 @@ async def simulate_call_turn(
 
     # Update database record if persistent call exists
     if call:
-        call.transcript = dialog_history
+        call.transcript = list(dialog_history)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(call, "transcript")
         call.status = result["call_status"]
         call.language_used = result["detected_language"]
         if result.get("outcome"):
@@ -330,10 +330,8 @@ async def simulate_call_turn(
 
         db.commit()
 
-    # Optional Sarvam audio synthesis
-    audio_b64 = None
-    if settings.SARVAM_API_KEY:
-        audio_b64 = await sarvam_adapter.text_to_speech(result["agent_response"], f"{result['detected_language']}-IN")
+    # High-fidelity bilingual audio synthesis (Sarvam AI with native gTTS fallback)
+    audio_b64 = await sarvam_adapter.text_to_speech(result["agent_response"], f"{result['detected_language']}-IN")
 
     return CallSimulateTurnResponse(
         agent_response=result["agent_response"],

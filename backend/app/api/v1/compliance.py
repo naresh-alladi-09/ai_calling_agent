@@ -17,6 +17,7 @@ router = APIRouter(prefix="", tags=["Compliance & Do-Not-Call (DND)"])
 
 
 @router.post("/contacts/{lead_id}/opt-out")
+@router.post("/leads/{lead_id}/opt-out")
 def opt_out_contact(
     lead_id: int,
     req: OptOutRequest,

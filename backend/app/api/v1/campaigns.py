@@ -100,6 +100,26 @@ def update_campaign(
     return campaign
 
 
+@router.post("/emergency-stop")
+def emergency_stop_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    GLOBAL EMERGENCY STOP: Immediately pauses all active campaigns and aborts outbound dialing.
+    """
+    running_campaigns = db.query(CallCampaign).filter(CallCampaign.status == "running").all()
+    for camp in running_campaigns:
+        camp.status = "stopped"
+        camp.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return {
+        "status": "stopped",
+        "message": f"Global Emergency Stop executed. {len(running_campaigns)} campaigns halted immediately."
+    }
+
+
 @router.post("/{campaign_id}/start", response_model=CampaignOut)
 def start_campaign(
     campaign_id: int,
@@ -132,23 +152,3 @@ def pause_campaign(
     db.commit()
     db.refresh(campaign)
     return campaign
-
-
-@router.post("/emergency-stop")
-def emergency_stop_all(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    GLOBAL EMERGENCY STOP: Immediately pauses all active campaigns and aborts outbound dialing.
-    """
-    running_campaigns = db.query(CallCampaign).filter(CallCampaign.status == "running").all()
-    for camp in running_campaigns:
-        camp.status = "stopped"
-        camp.updated_at = datetime.now(timezone.utc)
-
-    db.commit()
-    return {
-        "status": "stopped",
-        "message": f"Global Emergency Stop executed. {len(running_campaigns)} campaigns halted immediately."
-    }

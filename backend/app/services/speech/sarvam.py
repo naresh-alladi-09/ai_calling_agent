@@ -21,38 +21,57 @@ class SarvamSpeechAdapter:
     async def text_to_speech(self, text: str, language_code: str = "te-IN") -> Optional[str]:
         """
         Synthesize Telugu or Indian English speech into base64 audio.
+        Uses Sarvam AI if API key is configured, otherwise falls back seamlessly
+        to native gTTS for zero-carrier, zero-configuration local synthesis.
         """
-        if not self.api_key:
-            return None
+        # 1. Try Sarvam AI if configured
+        if self.api_key:
+            headers = {
+                "api-subscription-key": self.api_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "inputs": [text],
+                "target_language_code": "te-IN" if language_code.startswith("te") else "en-IN",
+                "speaker": "meera",
+                "pitch": 0,
+                "pace": 1.05,
+                "loudness": 1.5,
+                "speech_sample_rate": 8000,
+                "enable_preprocessing": True,
+                "model": self.voice_id
+            }
 
-        headers = {
-            "api-subscription-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "inputs": [text],
-            "target_language_code": "te-IN" if language_code.startswith("te") else "en-IN",
-            "speaker": "meera",  # or custom Indian male voice
-            "pitch": 0,
-            "pace": 1.05,
-            "loudness": 1.5,
-            "speech_sample_rate": 8000,
-            "enable_preprocessing": True,
-            "model": self.voice_id
-        }
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    res = await client.post(self.tts_url, headers=headers, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        audios = data.get("audios", [])
+                        if audios and len(audios[0]) > 0:
+                            return audios[0]
+                    else:
+                        logger.warning(f"Sarvam TTS returned status {res.status_code}: {res.text}")
+            except Exception as e:
+                logger.warning(f"Sarvam TTS error: {e}, falling back to gTTS")
 
+        # 2. Fallback to gTTS (native Telugu 'te' and Indian English 'en')
+        import asyncio
+        return await asyncio.to_thread(self._generate_gtts, text, language_code)
+
+    def _generate_gtts(self, text: str, language_code: str) -> Optional[str]:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(self.tts_url, headers=headers, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    audios = data.get("audios", [])
-                    return audios[0] if audios else None
-                else:
-                    logger.warning(f"Sarvam TTS returned status {res.status_code}: {res.text}")
+            import io
+            from gtts import gTTS
+            lang = "te" if language_code.startswith("te") else "en"
+            tld = "com" if lang == "te" else "co.in"
+            tts = gTTS(text=text, lang=lang, tld=tld)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
         except Exception as e:
-            logger.error(f"Error calling Sarvam TTS: {e}")
-        return None
+            logger.error(f"gTTS generation failed: {e}")
+            return None
 
     async def speech_to_text(self, audio_bytes: bytes, language_code: str = "te-IN") -> Optional[str]:
         """

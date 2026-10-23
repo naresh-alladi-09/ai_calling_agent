@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { PhoneCall, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { PhoneCall, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, Sparkles, CheckCircle, WifiOff } from 'lucide-react';
+import api from '../api/client';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -10,6 +11,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('checking'); // 'connected' | 'disconnected' | 'checking'
+
+  const checkBackend = async () => {
+    try {
+      await api.get('/health');
+      setBackendStatus('connected');
+    } catch (err) {
+      setBackendStatus('disconnected');
+    }
+  };
+
+  useEffect(() => {
+    checkBackend();
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -20,7 +35,12 @@ export default function LoginPage() {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid email or password');
+      if (!err.response) {
+        setError('Cannot connect to backend server at http://127.0.0.1:8000. Please start the backend with run_backend.bat or check that Uvicorn is running.');
+        setBackendStatus('disconnected');
+      } else {
+        setError(err.response?.data?.detail || 'Invalid email or password');
+      }
     } finally {
       setLoading(false);
     }
@@ -61,6 +81,24 @@ export default function LoginPage() {
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
               TRAI & DLT Compliant
             </span>
+          </div>
+
+          {/* Backend Connection Status Indicator */}
+          <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-800/60 border border-white/5 text-[11px]">
+            <span className="text-slate-400">FastAPI Backend (127.0.0.1:8000):</span>
+            <button
+              type="button"
+              onClick={checkBackend}
+              title="Click to re-check backend connectivity"
+              className="flex items-center gap-1.5 font-medium transition-colors cursor-pointer"
+            >
+              <span className={`w-2 h-2 rounded-full ${
+                backendStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : backendStatus === 'disconnected' ? 'bg-rose-500' : 'bg-amber-400'
+              }`} />
+              <span className={backendStatus === 'connected' ? 'text-emerald-400' : backendStatus === 'disconnected' ? 'text-rose-400 hover:underline' : 'text-amber-400'}>
+                {backendStatus === 'connected' ? 'Connected' : backendStatus === 'disconnected' ? 'Offline (Click to retry)' : 'Checking...'}
+              </span>
+            </button>
           </div>
 
           {error && (
