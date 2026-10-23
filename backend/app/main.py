@@ -17,6 +17,7 @@ from app.api.v1.demos import router as demos_router
 from app.api.v1.compliance import router as compliance_router
 from app.api.v1.settings import router as settings_router
 from app.api.v1.webhooks import router as webhooks_router
+from app.api.v1.auto_dialer import router as auto_dialer_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -193,6 +194,7 @@ app.include_router(demos_router, prefix="/api")
 app.include_router(compliance_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
+app.include_router(auto_dialer_router, prefix="/api")
 
 
 @app.get("/", tags=["System"])

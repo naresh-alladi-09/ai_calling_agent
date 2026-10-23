@@ -1,22 +1,24 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Users, 
-  PhoneCall, 
-  Mic, 
-  Megaphone, 
-  Calendar, 
-  Sliders, 
+import {
+  LayoutDashboard,
+  Users,
+  PhoneCall,
+  PhoneForwarded,
+  Mic,
+  Megaphone,
+  Calendar,
+  Sliders,
   ShieldCheck,
   GraduationCap
 } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/autodialer', label: 'CSV Auto-Dialer', icon: PhoneForwarded, highlight: true },
   { path: '/leads', label: 'College Leads', icon: Users },
   { path: '/calls', label: 'Call History', icon: PhoneCall },
-  { path: '/simulator', label: 'Voice Sandbox', icon: Mic, highlight: true },
+  { path: '/simulator', label: 'Voice Sandbox', icon: Mic },
   { path: '/campaigns', label: 'Campaigns', icon: Megaphone },
   { path: '/demos', label: 'Demo Bookings', icon: Calendar },
   { path: '/settings', label: 'AI Configuration', icon: Sliders },
@@ -47,10 +49,9 @@ export default function Sidebar() {
                 key={item.path}
                 to={item.path}
                 className={({ isActive }) =>
-                  `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                    isActive
-                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 font-semibold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all ${isActive
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   } ${item.highlight && !isActive ? 'border border-cyan-500/30 bg-cyan-950/20 text-cyan-300' : ''}`
                 }
               >

@@ -73,46 +73,42 @@ export default function Navbar({ callingMode = 'demo', onEmergencyStop }) {
         <button
           onClick={checkBackendHealth}
           title={backendStatus === 'connected' ? 'FastAPI Backend is running and connected (http://127.0.0.1:8000)' : 'Backend is unreachable. Click to retry.'}
-          className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
-            backendStatus === 'connected'
+          className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${backendStatus === 'connected'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
               : backendStatus === 'disconnected'
-              ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
-              : 'bg-slate-800 border-white/10 text-slate-400'
-          }`}
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                : 'bg-slate-800 border-white/10 text-slate-400'
+            }`}
         >
-          <span className={`w-2 h-2 rounded-full ${
-            backendStatus === 'connected'
+          <span className={`w-2 h-2 rounded-full ${backendStatus === 'connected'
               ? 'bg-emerald-400 animate-pulse'
               : backendStatus === 'disconnected'
-              ? 'bg-rose-500'
-              : 'bg-amber-400'
-          }`} />
+                ? 'bg-rose-500'
+                : 'bg-amber-400'
+            }`} />
           <span>
             {backendStatus === 'connected'
               ? 'Backend API Connected'
               : backendStatus === 'disconnected'
-              ? 'Backend Offline (Click to Retry)'
-              : 'Connecting...'}
+                ? 'Backend Offline (Click to Retry)'
+                : 'Connecting...'}
           </span>
         </button>
 
         {/* Environment Badge */}
-        <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border ${
-          callingMode === 'live' 
-            ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' 
+        <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border ${callingMode === 'live'
+            ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
             : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
-        }`}>
+          }`}>
           <span className={`w-2 h-2 rounded-full ${callingMode === 'live' ? 'bg-rose-500 animate-ping' : 'bg-blue-400'}`} />
           {callingMode === 'live' ? 'LIVE CARRIER CALLING' : 'DEMO MODE (Safe Simulation)'}
         </div>
 
         {/* TRAI Window Badge */}
-        <div className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 border ${
-          isWithinHours 
-            ? 'bg-slate-800 border-white/10 text-slate-300' 
+        <div className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 border ${isWithinHours
+            ? 'bg-slate-800 border-white/10 text-slate-300'
             : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-        }`}>
+          }`}>
           <Clock className="w-3.5 h-3.5 text-slate-400" />
           <span>{istTime}</span>
           <span className="text-[11px] text-slate-500">•</span>

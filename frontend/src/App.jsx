@@ -12,6 +12,7 @@ import DemosPage from './pages/DemosPage';
 import SettingsPage from './pages/SettingsPage';
 import CompliancePage from './pages/CompliancePage';
 import LoginPage from './pages/LoginPage';
+import AutoDialerPage from './pages/AutoDialerPage';
 import api from './api/client';
 
 function ProtectedLayout() {
@@ -65,6 +66,7 @@ function ProtectedLayout() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/leads" element={<LeadsPage />} />
             <Route path="/calls" element={<CallHistoryPage />} />
+            <Route path="/autodialer" element={<AutoDialerPage />} />
             <Route path="/simulator" element={<SimulatorPage />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/demos" element={<DemosPage />} />
