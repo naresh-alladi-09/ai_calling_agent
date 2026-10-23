@@ -94,6 +94,13 @@ def test_auto_dialer_endpoints():
     finally:
         db.close()
 
+    print("\n--- 7. Testing GET /api/auto-dialer/tts (Telugu Audio Stream) ---")
+    tts_res = client.get("/api/auto-dialer/tts", params={"text": "నమస్కారం అండి! నాని మాట్లాతున్నాను", "lang": "te"})
+    assert tts_res.status_code == 200, f"TTS error: {tts_res.status_code}"
+    assert tts_res.headers.get("content-type") == "audio/mpeg"
+    assert len(tts_res.content) > 1000
+    print(f"PASS: Received {len(tts_res.content)} bytes of native Telugu MP3 audio.")
+
     print("\n==========================================")
     print("ALL AUTO-DIALER ENDPOINTS AND LOGIC PASSED 100%!")
     print("==========================================")

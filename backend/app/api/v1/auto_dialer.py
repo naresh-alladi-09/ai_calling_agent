@@ -3,9 +3,10 @@ import io
 import re
 import uuid
 import random
+import httpx
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -48,6 +49,72 @@ class TestRealCallRequest(BaseModel):
     account_sid: Optional[str] = None
     auth_token: Optional[str] = None
     from_number: Optional[str] = None
+
+
+@router.get("/tts")
+async def stream_voice_audio(
+    text: str = Query(..., min_length=1),
+    lang: str = Query("te")
+):
+    """
+    Returns authentic native voice audio as MP3 for Telugu ('te') or Indian English ('en').
+    100% Free with zero external paid APIs.
+    """
+    target_lang = "te" if ("te" in lang.lower() or "telugu" in lang.lower()) else "en-IN"
+
+    # Split into sentence chunks to preserve prosody and avoid Google TTS character limits
+    raw_sentences = [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+    if not raw_sentences:
+        raw_sentences = [text.strip()]
+
+    chunks = []
+    current = ""
+    for s in raw_sentences:
+        if len(current) + len(s) < 180:
+            current = f"{current} {s}".strip()
+        else:
+            if current:
+                chunks.append(current)
+            current = s
+    if current:
+        chunks.append(current)
+
+    combined_bytes = bytearray()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://translate.google.com/"
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for chunk in chunks:
+            try:
+                resp = await client.get(
+                    "https://translate.google.com/translate_tts",
+                    params={
+                        "ie": "UTF-8",
+                        "tl": target_lang,
+                        "client": "tw-ob",
+                        "q": chunk
+                    },
+                    headers=headers
+                )
+                if resp.status_code == 200 and len(resp.content) > 0:
+                    combined_bytes.extend(resp.content)
+            except Exception:
+                pass
+
+    if len(combined_bytes) == 0:
+        raise HTTPException(status_code=500, detail="Voice audio synthesis failed")
+
+    return Response(
+        content=bytes(combined_bytes),
+        media_type="audio/mpeg",
+        headers={
+            "Content-Type": "audio/mpeg",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
 
 
 @router.get("/sample-csv", response_class=PlainTextResponse)
@@ -343,8 +410,8 @@ async def execute_autodial_call(
             "ai_summary": "Call blocked due to active DND suppression entry."
         }
 
-    # 3. Determine simulated conversational scenario
-    lang = lead.preferred_language or "te"
+    # 3. Determine conversational scenario and language
+    lang = req.preferred_language or lead.preferred_language or "te"
     name = lead.contact_name
     college = lead.college_name
     designation = lead.designation or "Sir/Madam"

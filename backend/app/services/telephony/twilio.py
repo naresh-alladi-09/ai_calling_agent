@@ -47,14 +47,13 @@ class TwilioTelephonyProvider(TelephonyProvider):
             contact = metadata.get("contact_name", "Sir or Madam") if metadata else "Sir or Madam"
 
             if lang == "te":
-                # Telugu voice synthesis
                 say_text = (
-                    f"నమస్కారం {contact} గారు! నేను స్టూడెంట్ మేనేజ్‌మెంట్ సిస్టమ్ నుండి నాని మాట్లాడుతున్నాను. "
-                    f"{college} కోసం మా 30 సెకన్ల dynamic QR అటెండెన్స్ మరియు యూనివర్సిటీ షార్టేజ్ కాలిక్యులేటర్ గురించి "
-                    "లైవ్ డెమో చూపించాలనుకుంటున్నాము. ధన్యవాదాలు!"
+                    f"Namaskaram {contact} garu! This is Nani from the Student Management System project calling for {college}. "
+                    "We provide dynamic thirty-second QR attendance to eliminate student proxy check-ins "
+                    "and automated UGC shortage calculation. We would love to schedule a live demonstration for your department."
                 )
                 voice_code = "Polly.Aditi"
-                lang_code = "te-IN"
+                lang_code = "en-IN"
             else:
                 say_text = (
                     f"Hello {contact}! This is Nani from the Student Management System project calling for {college}. "
@@ -68,7 +67,7 @@ class TwilioTelephonyProvider(TelephonyProvider):
 <Response>
     <Say voice="{voice_code}" language="{lang_code}">{say_text}</Say>
     <Pause length="2"/>
-    <Say voice="{voice_code}" language="{lang_code}">Please reply or visit our portal to confirm your demo time. Have a wonderful day!</Say>
+    <Say voice="{voice_code}" language="{lang_code}">Please reply or visit our website to confirm your demo time. Have a wonderful day!</Say>
 </Response>"""
 
         payload = {

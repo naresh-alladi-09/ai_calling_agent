@@ -34,10 +34,12 @@ import {
   Settings,
   HelpCircle,
   Send,
-  Smartphone
+  Smartphone,
+  Languages,
+  Mic
 } from 'lucide-react';
 
-// Web Audio synthesizer for phone sound effects (Zero external files needed, 100% Free)
+// Web Audio synthesizer for phone call ring & hangup beeps
 class PhoneAudioSynth {
   constructor() {
     this.ctx = null;
@@ -83,9 +85,7 @@ class PhoneAudioSynth {
         osc2.start();
         osc1.stop(this.ctx.currentTime + 1.2);
         osc2.stop(this.ctx.currentTime + 1.2);
-      } catch (e) {
-        // audio error ignored
-      }
+      } catch (e) {}
     };
 
     ringOnce();
@@ -146,9 +146,17 @@ export default function AutoDialerPage() {
   const [isDialing, setIsDialing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [voiceAudioEnabled, setVoiceAudioEnabled] = useState(true);
-  const [dialSpeed, setDialSpeed] = useState('live'); // 'live' (turn-by-turn speech) or 'turbo' (fast)
+  const [dialSpeed, setDialSpeed] = useState('live'); // 'live' or 'turbo'
   const [forcedOutcome, setForcedOutcome] = useState('auto'); // 'auto', 'demo_requested', 'callback_requested', 'not_interested'
   
+  // Call Language Preference
+  const [callLanguage, setCallLanguage] = useState('te'); // 'te' (Telugu), 'en' (English), 'auto'
+
+  // Active Speaker & Voice State
+  const [activeSpeaker, setActiveSpeaker] = useState(null); // 'agent', 'lead', or null
+  const [testingVoiceAudio, setTestingVoiceAudio] = useState(false);
+  const activeAudioRef = useRef(null);
+
   // Real calling vs Simulation mode
   const [callingMode, setCallingMode] = useState('simulated'); // 'simulated' or 'real'
   const [telephonyProvider, setTelephonyProvider] = useState('twilio'); // 'twilio' or 'exotel'
@@ -201,8 +209,8 @@ export default function AutoDialerPage() {
     loadSampleLeads();
     return () => {
       audioSynth.stopRing();
+      stopActiveAudio();
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
 
@@ -213,23 +221,104 @@ export default function AutoDialerPage() {
     } catch (e) {}
   };
 
-  // Web Speech API helper
-  const speakText = (text, lang) => {
-    if (!voiceAudioEnabled || !window.speechSynthesis) return Promise.resolve();
+  const stopActiveAudio = () => {
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.pause();
+        activeAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      activeAudioRef.current = null;
+    }
+    setActiveSpeaker(null);
+  };
+
+  // High-Quality Native Voice Audio Player (Calls FastAPI /api/auto-dialer/tts for crystal clear Telugu)
+  const playVoiceAudio = (text, lang) => {
+    if (!voiceAudioEnabled) return Promise.resolve();
+    stopActiveAudio();
+
     return new Promise((resolve) => {
       try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.05;
-        utterance.pitch = 1.0;
-        utterance.lang = lang === 'te' ? 'te-IN' : 'en-IN';
-        utterance.onend = () => resolve();
-        utterance.onerror = () => resolve();
-        window.speechSynthesis.speak(utterance);
+        const effectiveLang = callLanguage === 'te' ? 'te' : (callLanguage === 'en' ? 'en' : (lang || 'te'));
+        const encoded = encodeURIComponent(text);
+        const url = `/api/auto-dialer/tts?text=${encoded}&lang=${effectiveLang}`;
+        const audio = new Audio(url);
+        activeAudioRef.current = audio;
+
+        let resolved = false;
+        const done = () => {
+          if (!resolved) {
+            resolved = true;
+            activeAudioRef.current = null;
+            setActiveSpeaker(null);
+            resolve();
+          }
+        };
+
+        audio.onended = done;
+        audio.onerror = (e) => {
+          console.warn("TTS MP3 playback issue, attempting browser speech fallback", e);
+          fallbackWebSpeech(text, effectiveLang).then(done);
+        };
+
+        // Safety timeout so execution never hangs indefinitely
+        const maxWaitMs = Math.max(2500, Math.min(text.length * 140, 18000));
+        const timer = setTimeout(done, maxWaitMs);
+
+        const safeDone = () => {
+          clearTimeout(timer);
+          done();
+        };
+        audio.onended = safeDone;
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn("Audio play rejected (autoplay policy or network)", err);
+            fallbackWebSpeech(text, effectiveLang).then(safeDone);
+          });
+        }
       } catch (err) {
         resolve();
       }
     });
+  };
+
+  // Fallback to WebSpeech if MP3 cannot be decoded
+  const fallbackWebSpeech = (text, lang) => {
+    if (!window.speechSynthesis) return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.lang = lang === 'te' ? 'te-IN' : 'en-IN';
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        resolve();
+      }
+    });
+  };
+
+  // Instant Test Audio button handler
+  const handleTestTeluguVoice = async () => {
+    if (testingVoiceAudio) {
+      stopActiveAudio();
+      setTestingVoiceAudio(false);
+      return;
+    }
+
+    setTestingVoiceAudio(true);
+    const sampleGreeting = (
+      "నమస్కారం అండి! నేను స్టూడెంట్ మేనేజ్‌మెంట్ సిస్టమ్ నుండి నాని మాట్లాడుతున్నాను. " +
+      "మా సిస్టమ్‌లో 30 సెకన్ల dynamic QR అటెండెన్స్ మరియు యూనివర్సిటీ షార్టేజ్ కాలిక్యులేటర్ గురించి లైవ్ డెమో ఏర్పాటు చేద్దామా అండి?"
+    );
+
+    setActiveSpeaker('agent');
+    await playVoiceAudio(sampleGreeting, 'te');
+    setTestingVoiceAudio(false);
   };
 
   // 1-Click Load Sample Leads from Backend
@@ -237,7 +326,13 @@ export default function AutoDialerPage() {
     try {
       const res = await api.get('/auto-dialer/sample-leads');
       if (res.data && res.data.length > 0) {
-        setLeads(res.data.map(l => ({ ...l, call_status: 'pending' })));
+        // Enforce Telugu if selected
+        const mapped = res.data.map(l => ({
+          ...l,
+          preferred_language: callLanguage === 'te' ? 'te' : (callLanguage === 'en' ? 'en' : l.preferred_language),
+          call_status: 'pending'
+        }));
+        setLeads(mapped);
         setUploadError(null);
       }
     } catch (err) {
@@ -260,7 +355,7 @@ export default function AutoDialerPage() {
           designation: "Principal",
           phone_number: "+919701045678",
           email: "dean@cbit.ac.in",
-          preferred_language: "en",
+          preferred_language: "te",
           call_status: "pending"
         },
         {
@@ -290,11 +385,20 @@ export default function AutoDialerPage() {
           designation: "Controller of Examinations",
           phone_number: "+919490134567",
           email: "coe@osmania.ac.in",
-          preferred_language: "en",
+          preferred_language: "te",
           call_status: "pending"
         }
       ]);
     }
+  };
+
+  // Change language preference
+  const handleLanguageChange = (newLang) => {
+    setCallLanguage(newLang);
+    setLeads(prev => prev.map(l => ({
+      ...l,
+      preferred_language: newLang === 'auto' ? (l.preferred_language || 'te') : newLang
+    })));
   };
 
   // Download Sample CSV
@@ -333,7 +437,11 @@ export default function AutoDialerPage() {
       });
 
       if (res.data.success && res.data.leads) {
-        const parsed = res.data.leads.map(l => ({ ...l, call_status: 'pending' }));
+        const parsed = res.data.leads.map(l => ({
+          ...l,
+          preferred_language: callLanguage === 'te' ? 'te' : (callLanguage === 'en' ? 'en' : (l.preferred_language || 'te')),
+          call_status: 'pending'
+        }));
         setLeads(parsed);
         setCurrentIndex(-1);
         setResults([]);
@@ -391,7 +499,7 @@ export default function AutoDialerPage() {
         account_sid: twilioConfig.accountSid,
         auth_token: twilioConfig.authToken,
         from_number: twilioConfig.fromNumber,
-        preferred_language: 'te'
+        preferred_language: callLanguage === 'te' ? 'te' : 'en'
       });
 
       if (res.data.success) {
@@ -415,13 +523,16 @@ export default function AutoDialerPage() {
     }
   };
 
-  // Run a single outbound call
+  // Run a single outbound call with authentic conversational speech
   const callSingleLead = async (lead) => {
     setCurrentLead(lead);
     setActiveCallStage('ringing');
     setCurrentTranscript([]);
     setCallTimer(0);
     setLastOutcome(null);
+    setActiveSpeaker(null);
+
+    const effectiveLang = callLanguage === 'te' ? 'te' : (callLanguage === 'en' ? 'en' : (lead.preferred_language || 'te'));
 
     if (voiceAudioEnabled && callingMode === 'simulated') {
       audioSynth.playRing();
@@ -434,11 +545,12 @@ export default function AutoDialerPage() {
     }, 1000);
 
     // Ringing delay
-    const ringTime = dialSpeed === 'turbo' ? 400 : 2000;
+    const ringTime = dialSpeed === 'turbo' ? 400 : 2200;
     await sleep(ringTime);
 
     if (stopRequestedRef.current) {
       audioSynth.stopRing();
+      stopActiveAudio();
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       setActiveCallStage('idle');
       return null;
@@ -459,7 +571,7 @@ export default function AutoDialerPage() {
         college_name: lead.college_name,
         phone_number: lead.phone_number,
         designation: lead.designation,
-        preferred_language: lead.preferred_language || 'te',
+        preferred_language: effectiveLang,
         email: lead.email,
         forced_outcome: forcedOutcome === 'auto' ? null : forcedOutcome,
         calling_mode: callingMode,
@@ -485,7 +597,7 @@ export default function AutoDialerPage() {
       };
     }
 
-    // Render dialogue turns
+    // Render dialogue turns one-by-one with REAL voice audio playback
     const dialogueTurns = callData.transcript || [];
     const displayedTurns = [];
 
@@ -502,12 +614,18 @@ export default function AutoDialerPage() {
 
       if (dialSpeed === 'live') {
         if (voiceAudioEnabled && callingMode === 'simulated' && turn.role !== 'system') {
-          await speakText(turn.text, lead.preferred_language);
+          // Highlight who is speaking
+          setActiveSpeaker(turn.role);
+          // Play the natural voice audio & wait for completion!
+          await playVoiceAudio(turn.text, effectiveLang);
+          setActiveSpeaker(null);
+          // Natural conversational pause between turns
+          await sleep(650);
         } else {
-          await sleep(1400);
+          await sleep(1500);
         }
       } else {
-        await sleep(150);
+        await sleep(200);
       }
     }
 
@@ -515,6 +633,7 @@ export default function AutoDialerPage() {
     if (voiceAudioEnabled && callingMode === 'simulated') {
       audioSynth.playHangup();
     }
+    stopActiveAudio();
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
     setActiveCallStage('ended');
@@ -528,7 +647,7 @@ export default function AutoDialerPage() {
       college_name: lead.college_name,
       phone_number: lead.phone_number,
       designation: lead.designation,
-      preferred_language: lead.preferred_language,
+      preferred_language: effectiveLang,
       calling_mode: callingMode,
       carrier_info: callData.real_carrier_info,
       outcome: callData.outcome,
@@ -546,7 +665,7 @@ export default function AutoDialerPage() {
     setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, call_status: callData.outcome } : l));
 
     // Post-call breather
-    const delayAfter = dialSpeed === 'turbo' ? 300 : 1500;
+    const delayAfter = dialSpeed === 'turbo' ? 300 : 1600;
     await sleep(delayAfter);
 
     return resultItem;
@@ -605,7 +724,7 @@ export default function AutoDialerPage() {
     setIsDialing(false);
     setIsPaused(false);
     audioSynth.stopRing();
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    stopActiveAudio();
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     setActiveCallStage('idle');
   };
@@ -670,6 +789,17 @@ export default function AutoDialerPage() {
                 <Radio className={`w-3.5 h-3.5 ${callingMode === 'real' ? 'animate-pulse' : ''}`} />
                 <span>{callingMode === 'real' ? 'LIVE CARRIER CALLING (Real Phone Lines)' : '100% Free Virtual Sandbox Mode'}</span>
               </span>
+
+              {/* Instant Test Telugu Voice Button */}
+              <button
+                type="button"
+                onClick={handleTestTeluguVoice}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/40 hover:to-blue-600/40 text-cyan-300 text-xs font-medium border border-cyan-500/40 transition-all shadow-sm"
+                title="Click to hear authentic native Telugu voice audio right now"
+              >
+                <Volume2 className={`w-3.5 h-3.5 ${testingVoiceAudio ? 'animate-bounce text-cyan-400' : 'text-cyan-400'}`} />
+                <span>{testingVoiceAudio ? 'Playing Telugu Speech...' : '🔊 Test Telugu AI Voice'}</span>
+              </button>
               
               <button
                 type="button"
@@ -685,7 +815,7 @@ export default function AutoDialerPage() {
               Client Auto-Dialer & Demo Qualifier
             </h1>
             <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
-              Upload your client spreadsheet. The AI dials each lead, answers naturally in Telugu or English, pitches the Student Management System, and instantly categorizes whether they are <strong>OK for a demo</strong> or decline.
+              Upload your client spreadsheet. The AI dials each lead, speaks fluently in <strong>Telugu</strong> or <strong>English</strong> with native audio, pitches the Student Management System, and instantly qualifies whether they are <strong>OK for a demo</strong>.
             </p>
           </div>
 
@@ -949,6 +1079,55 @@ export default function AutoDialerPage() {
               </div>
             </div>
 
+            {/* Language Selection Bar (Enforces Telugu Voice) */}
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Languages className="w-4 h-4 text-cyan-400" />
+                  <span>Call Language & Voice:</span>
+                </span>
+                <span className="text-[10px] uppercase font-bold text-cyan-400">
+                  {callLanguage === 'te' ? '🇮🇳 Telugu Voice Active' : (callLanguage === 'en' ? '🌐 English Voice' : '🔄 Auto Detect')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleLanguageChange('te')}
+                  className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all text-center ${
+                    callLanguage === 'te'
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  తెలుగు (Telugu)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLanguageChange('en')}
+                  className={`py-2 px-2.5 rounded-lg text-xs font-medium transition-all text-center ${
+                    callLanguage === 'en'
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLanguageChange('auto')}
+                  className={`py-2 px-2.5 rounded-lg text-xs font-medium transition-all text-center ${
+                    callLanguage === 'auto'
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Auto (CSV)
+                </button>
+              </div>
+            </div>
+
             {/* Audio & Speed Controls */}
             <div className="grid grid-cols-2 gap-3 text-xs">
               <button
@@ -1016,7 +1195,7 @@ export default function AutoDialerPage() {
                   }`}
                 >
                   <PhoneCall className="w-4 h-4" />
-                  <span>{callingMode === 'real' ? `Call Real Clients (${leads.length})` : `Start Free Calling (${leads.length})`}</span>
+                  <span>{callingMode === 'real' ? `Call Real Clients (${leads.length})` : `Start Calling Clients (${leads.length})`}</span>
                 </button>
               ) : (
                 <>
@@ -1064,6 +1243,7 @@ export default function AutoDialerPage() {
               {leads.map((lead, idx) => {
                 const isCurrent = idx === currentIndex;
                 const status = lead.call_status || 'pending';
+                const effectiveLeadLang = callLanguage === 'te' ? 'te' : (callLanguage === 'en' ? 'en' : (lead.preferred_language || 'te'));
                 return (
                   <div
                     key={lead.id || idx}
@@ -1086,8 +1266,8 @@ export default function AutoDialerPage() {
                     </div>
 
                     <div className="shrink-0 flex items-center gap-1.5">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded uppercase font-semibold bg-slate-800 text-slate-400">
-                        {lead.preferred_language || 'te'}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded uppercase font-semibold bg-slate-800 text-slate-300">
+                        {effectiveLeadLang === 'te' ? 'తెలుగు' : 'ENG'}
                       </span>
                       {status === 'pending' && !isCurrent && (
                         <span className="w-2 h-2 rounded-full bg-slate-600" title="Pending" />
@@ -1121,7 +1301,7 @@ export default function AutoDialerPage() {
         {/* Right Column: Live Phone Call Screen & Dialogue (7 Cols) */}
         <div className="lg:col-span-7 space-y-6">
           {/* Virtual Phone Display Card */}
-          <div className="rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950 border border-white/10 shadow-2xl p-6 min-h-[460px] flex flex-col justify-between">
+          <div className="rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950 border border-white/10 shadow-2xl p-6 min-h-[490px] flex flex-col justify-between">
             {/* Header of Active Call */}
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-white/10">
@@ -1152,6 +1332,19 @@ export default function AutoDialerPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                  {/* Speaker Wave Pulse */}
+                  {activeSpeaker && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-semibold animate-pulse">
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>{activeSpeaker === 'agent' ? 'Nani AI Speaking...' : 'Client Replying...'}</span>
+                      <div className="flex items-center gap-0.5 ml-1">
+                        <span className="w-1 h-3 bg-cyan-400 rounded-full animate-bounce" />
+                        <span className="w-1 h-4 bg-cyan-400 rounded-full animate-bounce [animation-delay:0.15s]" />
+                        <span className="w-1 h-2 bg-cyan-400 rounded-full animate-bounce [animation-delay:0.3s]" />
+                      </div>
+                    </div>
+                  )}
+
                   <span className="text-xs font-mono font-bold px-3 py-1 rounded-lg bg-slate-900 border border-slate-700 text-cyan-400">
                     ⏱️ {String(Math.floor(callTimer / 60)).padStart(2, '0')}:{String(callTimer % 60).padStart(2, '0')}
                   </span>
@@ -1176,8 +1369,9 @@ export default function AutoDialerPage() {
                   </div>
 
                   <div className="text-right">
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-blue-900/30 border border-blue-500/30 text-blue-300">
-                      {currentLead.preferred_language === 'te' ? 'Telugu Voice' : 'English Voice'}
+                    <span className="text-[10px] px-2.5 py-1 rounded-full font-bold uppercase bg-blue-900/30 border border-blue-500/30 text-blue-300 flex items-center gap-1.5">
+                      <Volume2 className="w-3 h-3 text-cyan-400" />
+                      <span>{callLanguage === 'te' ? 'Native Telugu Audio' : 'English Audio'}</span>
                     </span>
                   </div>
                 </div>
@@ -1206,6 +1400,7 @@ export default function AutoDialerPage() {
               {currentTranscript.map((msg, idx) => {
                 const isAgent = msg.role === 'agent';
                 const isSystem = msg.role === 'system';
+                const isCurrentlySpeaking = activeSpeaker === msg.role && idx === currentTranscript.length - 1;
 
                 if (isSystem) {
                   return (
@@ -1228,19 +1423,26 @@ export default function AutoDialerPage() {
                       </div>
                     )}
                     <div
-                      className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-xs shadow-md leading-relaxed ${
+                      className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-xs shadow-md leading-relaxed transition-all ${
+                        isCurrentlySpeaking
+                          ? 'ring-2 ring-cyan-400 scale-[1.01]'
+                          : ''
+                      } ${
                         isAgent
                           ? 'bg-blue-950/80 border border-blue-500/30 text-slate-100 rounded-tl-none'
                           : 'bg-emerald-950/80 border border-emerald-500/30 text-emerald-100 rounded-tr-none'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-4 mb-1 text-[10px] text-slate-400">
-                        <span className="font-semibold text-slate-300">
-                          {isAgent ? "Nani AI Calling Agent" : currentLead?.contact_name || "Client"}
+                        <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                          <span>{isAgent ? "Nani AI Calling Agent" : currentLead?.contact_name || "Client"}</span>
+                          {isCurrentlySpeaking && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                          )}
                         </span>
                         <span className="font-mono">{msg.timestamp || '00:00'}</span>
                       </div>
-                      <p>{msg.text}</p>
+                      <p className="text-sm">{msg.text}</p>
                     </div>
                     {!isAgent && (
                       <div className="w-7 h-7 rounded-full bg-emerald-700 flex items-center justify-center text-white shrink-0 mt-0.5">
@@ -1350,6 +1552,7 @@ export default function AutoDialerPage() {
                 <th className="py-3 px-3">Client Name</th>
                 <th className="py-3 px-3">College / Institution</th>
                 <th className="py-3 px-3">Phone</th>
+                <th className="py-3 px-3">Voice Lang</th>
                 <th className="py-3 px-3">Mode</th>
                 <th className="py-3 px-3">Duration</th>
                 <th className="py-3 px-3">Demo Qualification Status</th>
@@ -1359,8 +1562,8 @@ export default function AutoDialerPage() {
             <tbody className="divide-y divide-slate-800/60">
               {results.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
-                    No calls executed yet. Click "Start Free Calling" or "Call Real Clients" above to begin dialing.
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
+                    No calls executed yet. Click "Start Calling Clients" above to begin dialing.
                   </td>
                 </tr>
               ) : (
@@ -1372,6 +1575,11 @@ export default function AutoDialerPage() {
                     </td>
                     <td className="py-3 px-3 text-slate-300">{r.college_name}</td>
                     <td className="py-3 px-3 font-mono text-cyan-300">{r.phone_number}</td>
+                    <td className="py-3 px-3">
+                      <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-blue-950 text-cyan-300 border border-blue-800">
+                        {r.preferred_language === 'te' ? 'తెలుగు' : 'English'}
+                      </span>
+                    </td>
                     <td className="py-3 px-3">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
                         r.calling_mode === 'real'
@@ -1484,7 +1692,7 @@ export default function AutoDialerPage() {
                     </span>
                     <span className="font-mono">{t.timestamp}</span>
                   </div>
-                  <p className="leading-relaxed">{t.text}</p>
+                  <p className="leading-relaxed text-sm">{t.text}</p>
                 </div>
               ))}
             </div>
